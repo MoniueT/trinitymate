@@ -445,6 +445,9 @@ const SYMPTOMS=[
   {k:'jointpain',label:'Joint pain',c:['eds'],g:'jt'},
   {k:'instability',label:'Joint instability / giving way',c:['eds'],g:'jt'},
   {k:'skinfrag',label:'Skin fragility / easy bruising',c:['eds'],g:'jt'},
+  {k:'neckpain',label:'Neck pain',c:['mcas','eds','pots'],b:['eds'],g:'pn'},
+  {k:'backpain',label:'Back pain',c:['mcas','eds','pots'],b:['eds'],g:'pn'},
+  {k:'nervepain',label:'Nerve pain (burning, tingling, shooting)',c:['mcas','eds','pots'],b:['eds'],g:'pn'},
   {k:'heart',label:'Racing heart / palpitations',c:['mcas','pots'],g:'hc'},
   {k:'dizzy',label:'Dizziness / lightheadedness',c:['mcas','eds','pots'],g:'hc'},
   {k:'bp',label:'Near-fainting / blood pressure drop',c:['mcas','pots'],g:'hc'},
@@ -454,11 +457,18 @@ const SYMPTOMS=[
   {k:'fatigue',label:'Fatigue / exhaustion',c:['eds','pots'],g:'wb'},
   {k:'brainfog',label:'Brain fog / concentration',c:['mcas','eds','pots'],g:'wb'},
   {k:'head',label:'Headache / migraine',c:['mcas','eds'],g:'wb'},
+  {k:'aura',label:'Visual aura / visual disturbance',c:['mcas','eds','pots'],b:['mcas','eds'],g:'wb'},
   {k:'gut',label:'Nausea / gut pain / bloating',c:['mcas','eds','pots'],g:'wb'},
   {k:'sleep',label:'Poor / unrefreshing sleep',c:['eds'],g:'wb'},
 ];
-const SYMGROUPS=[['mc','Mast cell & allergy'],['jt','Joints & tissue'],['hc','Heart & circulation'],['wb','Whole body']];
-function activeSymptoms(){return SYMPTOMS.filter(s=>anyOf(s.c));}
+const SYMGROUPS=[['mc','Mast cell & allergy'],['jt','Joints & tissue'],['pn','Pain & nerves'],['hc','Heart & circulation'],['wb','Whole body']];
+/* b = which condition scores a symptom counts towards (defaults to c). The general pain
+   symptoms show for everyone but only count towards EDS, so back pain can't make a mast cell reaction. */
+function symB(s){return s.b||s.c;}
+function symHidden(k){const h=state&&state.profile&&state.profile.hiddenSyms;return !!(h&&h.includes(k));}
+/* Symptoms that fit the person's conditions, before their own hiding */
+function fitSymptoms(){return SYMPTOMS.filter(s=>anyOf(s.c));}
+function activeSymptoms(){return fitSymptoms().filter(s=>!symHidden(s.k));}
 /* signature symptoms: the ones that point clearly at one condition */
 const SIG={mcas:['skin','flushing','breathing','bowels','phantosmia'],eds:['jointpain','instability','skinfrag'],pots:['heart','dizzy','bp','exercise','tempintol','tremor']};
 const FOODTAGS=[
@@ -483,8 +493,8 @@ function sevOf(c,k){return ((c&&c.sev)||{})[k]||0;}
    reaction, so it needs a mast cell signature symptom at 2+, or a shared one at 3+. */
 function isFlare(c){
   if(!c||!c.sev||!has('mcas')) return false;
-  if(condCount()===1) return Object.values(c.sev).some(v=>(v||0)>=2);
-  return SIG.mcas.some(k=>sevOf(c,k)>=2)||SYMPTOMS.some(s=>s.c.includes('mcas')&&sevOf(c,s.k)>=3);
+  if(condCount()===1) return SYMPTOMS.some(s=>symB(s).includes('mcas')&&sevOf(c,s.k)>=2);
+  return SIG.mcas.some(k=>sevOf(c,k)>=2)||SYMPTOMS.some(s=>symB(s).includes('mcas')&&sevOf(c,s.k)>=3);
 }
 function hrJump(c){if(!c||c.restHR==null||c.restHR===''||c.standHR==null||c.standHR==='')return null;const j=Math.round(Number(c.standHR)-Number(c.restHR));return isNaN(j)?null:j;}
 /* A hard day for any of the three: a mast cell reaction, a 30+ bpm standing rise, or any symptom at 3+ */
@@ -538,7 +548,7 @@ let state=load();
 
 function blank(){return{
   profile:{name:'', yob:'', sex:'', dx:'', stage:'', conditions:[], pregnancy:false, goals:[],
-    has:{mcas:false,eds:false,pots:false}, edsType:'', potsType:'', visitChecked:{}},
+    has:{mcas:false,eds:false,pots:false}, edsType:'', potsType:'', visitChecked:{}, hiddenSyms:[]},
   meds:[],          // {id, name, dose, time}
   checkins:[],      // {date, sev:{}, energy, mood, weight, triggers, foods, relief, dur, notes, restHR, standHR, restBP, standBP}
   doses:[],         // {date, taken:{medId:true}, correct:{empty,gap,supps}}
@@ -547,7 +557,7 @@ function blank(){return{
   plan:null, shopping:{},
   diet:{gf:false, df:false, veg:false, nf:false, ff:false},
   food:{q:'', tier:'all'},
-  settings:{unit:'kg', labView:'standard', cycleOn:false, fluidTarget:2500, saltTarget:6, spoonsOn:null, spoonBudget:12, theme:'auto'},
+  settings:{unit:'kg', labView:'standard', cycleOn:false, fluidTarget:2500, saltTarget:6, spoonsOn:null, spoonBudget:12, theme:'auto', symNewSeen:true},
   reminders:{doseOn:true, doseTime:'08:00', checkinOn:true, checkinDays:5, notify:false, lastNotifyDate:''},
   lastVisit:null,   // snapshot saved when the visit summary is printed
   experiment:null, experiments:[],
@@ -580,10 +590,12 @@ function normaliseState(saved){
   s.profile.has=Object.assign({mcas:false,eds:false,pots:false},(saved.profile&&saved.profile.has)||{});
   s.reminders=Object.assign(blank().reminders, saved.reminders||{});
   s.settings=Object.assign(blank().settings, saved.settings||{});
+  if(saved.settings&&saved.settings.symNewSeen==null&&(saved.checkins||[]).length) s.settings.symNewSeen=false;
   s.diet=Object.assign(blank().diet, saved.diet||{});
   s.food=Object.assign(blank().food, saved.food||{});
   if(!Array.isArray(s.profile.conditions)) s.profile.conditions=[];
   if(!Array.isArray(s.profile.goals)) s.profile.goals=[];
+  s.profile.hiddenSyms=Array.isArray(s.profile.hiddenSyms)?s.profile.hiddenSyms.filter(k=>SYMPTOMS.some(x=>x.k===k)):[];
   if(!s.profile.visitChecked||typeof s.profile.visitChecked!=='object') s.profile.visitChecked={};
   ['checkins','doses','dosechanges','labs','experiments','customfoods','periods','reintros','meds','jointEvents','beighton','customNotes','imported','leanTests','prn'].forEach(k=>{ if(!Array.isArray(s[k])) s[k]=[]; });
   ['shopping','water','foodmarks','salt','compression','pt','brace','spoons'].forEach(k=>{ if(!s[k]||typeof s[k]!=='object'||Array.isArray(s[k])) s[k]={}; });
@@ -675,7 +687,7 @@ function safeRender(fn){try{return fn()||'';}catch(e){try{console.error(fn&&fn.n
 function last(arr){return arr&&arr.length?arr[arr.length-1]:null;}
 /* Score for one condition from its own symptoms, 0 to 100 */
 /* Blends the average with the worst symptom, so one severe symptom on an otherwise quiet day still registers */
-const CONDSYMS={mcas:[],eds:[],pots:[]};SYMPTOMS.forEach(s=>s.c.forEach(k=>CONDSYMS[k].push(s.k)));
+const CONDSYMS={mcas:[],eds:[],pots:[]};SYMPTOMS.forEach(s=>symB(s).forEach(k=>CONDSYMS[k].push(s.k)));
 function condBurden(c,k){if(!c||!c.sev)return null;const v=[];const ks=CONDSYMS[k];for(let i=0;i<ks.length;i++){const x=c.sev[ks[i]];if(x!=null)v.push(Number(x)||0);}if(!v.length)return null;const mean=v.reduce((a,b)=>a+b,0)/v.length;return Math.round((mean*0.4+Math.max(...v)*0.6)*25);}
 /* Overall burden is the worst of the person's condition scores. Averaging all 19 symptoms
    together made a rough joint day look like 15/100 for someone with all three. */
@@ -1253,7 +1265,7 @@ function animateFF(target){
 const BODY_SYSTEMS=[
  {k:'skinS', label:'Skin', e:'\uD83E\uDDF4', keys:['skin','flushing']},
  {k:'gutS', label:'Gut / digestive', e:'\uD83E\uDD22', keys:['gut','bowels']},
- {k:'neuroS', label:'Neurological', e:'\uD83E\uDDE0', keys:['head','brainfog']},
+ {k:'neuroS', label:'Neurological', e:'\uD83E\uDDE0', keys:['head','brainfog','aura']},
  {k:'cardioS', label:'Cardiovascular', e:'\uD83E\uDEC0', keys:['heart','bp']},
  {k:'respS', label:'Respiratory / airway', e:'\uD83E\uDEC1', keys:['breathing']},
 ];
@@ -1574,6 +1586,9 @@ function renderHome(){
   const fluidT=state.settings.fluidTarget||2500;
   document.getElementById('s-home').innerHTML=`
     ${condCount()?'':`<div class="card" style="border:1.5px solid var(--violet)"><h2>Which conditions are yours?</h2><div class="csub">Pick MCAS, EDS, POTS or any mix, and TrinityMate shapes the check-in, tips and visit summary around you. You can change it any time in your profile.</div><div class="row wrap"><button class="btn btn-primary btn-sm" onclick="openCondPicker()">Choose my conditions</button><button class="btn btn-ghost btn-sm" onclick="loadDemo(true)">See it with example data</button></div></div>`}
+
+    ${(!state.checkins.length&&!state.imported.length&&!state.importHintOff)?`<div class="card" style="padding:16px 18px"><div style="display:flex;gap:12px;align-items:flex-start"><div style="font-size:22px">🔄</div><div style="flex:1"><b>Used MastMate, EDSMate or PotsMate before?</b><div class="muted" style="font-size:13px;margin-top:2px">Bring your history across so nothing starts from zero.</div>
+      <div class="row wrap" style="gap:8px;margin-top:10px"><button class="btn btn-primary btn-sm" onclick="maybeOfferImport(true)">Bring it in</button><button class="btn btn-ghost btn-sm" onclick="state.importHintOff=true;save();renderHome()">No, I'm new</button></div></div></div></div>`:''}
 
     <div class="card hero-dark" style="padding:28px 20px 24px;text-align:center">
       <div class="glabel">${sd==null?'Your patterns, on record':(sd===0?'Hard day logged today':'Steady for')}</div>
@@ -1989,6 +2004,7 @@ function renderDaily(){
     <div class="card" style="display:flex;align-items:center;gap:14px;padding:14px 16px;cursor:pointer" onclick="openQuick()">
       <div style="font-size:24px">🪫</div><div style="flex:1"><b>Rough day? Do the 3-tap version</b><div class="muted" style="font-size:12.5px">For foggy, low-energy days. Fill in the rest later if you can.</div></div><span style="color:var(--soft)">▸</span>
     </div>
+    ${condCount()&&!state.settings.symNewSeen?`<div class="note" style="margin-bottom:16px"><b>New:</b> neck pain, back pain, nerve pain and visual aura are now in the check-in. Don't need some of them? <a href="#" onclick="openSymChooser();return false">Hide the ones you don't have</a>. <a href="#" onclick="state.settings.symNewSeen=true;save();renderDaily();return false">Got it</a></div>`:''}
     ${condCount()?'':`<div class="note" style="margin-bottom:16px"><b>Tip:</b> pick your conditions in your <a href="#" onclick="openCondPicker();return false">profile</a> and this check-in trims itself to the symptoms that matter to you.</div>`}
     <div class="card">
       ${groups.map(([label,list])=>`${groups.length>1?`<div class="csec">${label}</div>`:''}${list.map(s=>{const v=draft.sev[s.k]??0;return `
@@ -1997,6 +2013,7 @@ function renderDaily(){
           <div class="segs">${[0,1,2,3,4].map(i=>`<button class="seg ${i>0&&i<=v?(v>=3?'hi':'on'):''}" onclick="setSev('${s.k}',${i})" aria-label="${s.label} ${i}"></button>`).join('')}</div>
         </div>`;}).join('')}`).join('')}
       <div class="legend"><span>0 None</span><span>1 Mild</span><span>2 Moderate</span><span>3 Marked</span><span>4 Severe</span></div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:12px" onclick="openSymChooser()">Choose which symptoms you see${hiddenCount()?` (${hiddenCount()} hidden)`:''}</button>
     </div>
 
     ${has('pots')?`<div class="card">
@@ -2109,7 +2126,7 @@ function saveQuick(){
   let rec=state.checkins.find(c=>c.date===today());
   if(!rec){rec={date:today(),sev:{},energy:Math.max(0,3-quick.v),mood:null,weight:'',triggers:[],foods:[],relief:[],dur:'',notes:'',restHR:null,standHR:null,restBP:'',standBP:'',quick:true};
     activeSymptoms().forEach(s=>rec.sev[s.k]=0);state.checkins.push(rec);state.checkins.sort((a,b)=>a.date<b.date?-1:1);}
-  QUICK_AREAS.filter(a=>quick.areas.includes(a.k)).forEach(a=>a.keys.forEach(k=>{if(SYMPTOMS.some(s=>s.k===k&&anyOf(s.c)))rec.sev[k]=Math.max(rec.sev[k]||0,quick.v);}));
+  QUICK_AREAS.filter(a=>quick.areas.includes(a.k)).forEach(a=>a.keys.forEach(k=>{if(activeSymptoms().some(s=>s.k===k))rec.sev[k]=Math.max(rec.sev[k]||0,quick.v);}));
   if(quick.trig&&!rec.triggers.includes(quick.trig))rec.triggers.push(quick.trig);
   draftDate=null;save();
   document.getElementById('modalbg').classList.remove('on');
@@ -3500,6 +3517,27 @@ function openCondPicker(inOnboarding){
     <button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="finishCondPicker()">${condCount()?'Done':'Choose at least one'}</button>`;
   document.getElementById('modalbg').classList.add('on');
 }
+function hiddenCount(){return fitSymptoms().filter(s=>symHidden(s.k)).length;}
+function openSymChooser(){
+  state.settings.symNewSeen=true;save();
+  const m=document.getElementById('modal');
+  const list=fitSymptoms();
+  const groups=SYMGROUPS.map(([g,label])=>[label,list.filter(s=>s.g===g)]).filter(x=>x[1].length);
+  m.innerHTML=`<h2>Your symptoms</h2>
+    <p class="lede" style="font-size:14.5px">Untick any you don't get. They leave your check-in, and anything you logged before is kept.</p>
+    ${groups.map(([label,arr])=>`<div class="csec">${label}</div>${arr.map(s=>{const on=!symHidden(s.k);return `<div class="check ${on?'on':''}" role="checkbox" aria-checked="${on}" tabindex="0" onclick="toggleSymHidden('${s.k}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSymHidden('${s.k}')}"><div class="box">${on?'✓':''}</div><div><div class="ct">${s.label}</div></div></div>`;}).join('')}`).join('')}
+    <div style="height:10px"></div>
+    ${hiddenCount()?`<button class="btn btn-ghost btn-block" style="margin-bottom:8px" onclick="state.profile.hiddenSyms=[];save();openSymChooser()">Show them all again</button>`:''}
+    <button class="btn btn-primary btn-block" style="margin-bottom:8px" onclick="closeSymChooser()">Done</button>`;
+  document.getElementById('modalbg').classList.add('on');
+}
+function toggleSymHidden(k){
+  const h=state.profile.hiddenSyms;const i=h.indexOf(k);
+  if(i>=0)h.splice(i,1);
+  else{if(activeSymptoms().length<=1){toast('Keep at least one symptom');return;}h.push(k);}
+  save();openSymChooser();
+}
+function closeSymChooser(){document.getElementById('modalbg').classList.remove('on');render();}
 function finishCondPicker(){
   if(!condCount()){toast('Pick at least one to carry on');return;}
   state.onboarded=true;save();
@@ -3524,6 +3562,13 @@ function renderProfile(){
       <div class="pill-row">${POTS_TYPES.map(t=>`<span class="pill ${p.potsType===t?'on':''}" onclick="state.profile.potsType=(state.profile.potsType==='${t}'?'':'${t}');save();renderProfile()">${t}</span>`).join('')}</div>`:''}
       ${has('mcas')?`<div class="check ${p.pregnancy?'on':''}" style="margin-top:12px" onclick="state.profile.pregnancy=!state.profile.pregnancy;save();renderProfile()"><div class="box">${p.pregnancy?'✓':''}</div><div><div class="ct">I carry an adrenaline pen / emergency plan</div><div class="cs">TrinityMate will keep emergency signs front and centre</div></div></div>`:''}
     </div>
+
+    ${condCount()?`<div class="card">
+      <h2>Your symptoms</h2>
+      <div class="csub">Hide any you don't get, so the check-in only asks about yours. Hidden ones keep their past entries.</div>
+      <div class="muted" style="font-size:13.5px;margin-bottom:10px">Showing ${activeSymptoms().length} of ${fitSymptoms().length}</div>
+      <button class="btn btn-ghost btn-sm" onclick="openSymChooser()">Choose symptoms</button>
+    </div>`:''}
 
     <div class="card">
       <h2>The basics</h2>
@@ -3793,7 +3838,8 @@ function maybeOfferImport(manual){
   if(!found.length){
     if(manual){
       m.innerHTML=`<h2>Bring in your data</h2>
-        <p class="lede" style="font-size:15px">Nothing from MastMate, EDSMate or PotsMate was found in this browser. If you used them on another phone or browser, open the app there, go to Settings and back up to a file, then import that file here.</p>
+        <p class="lede" style="font-size:15px">Nothing from MastMate, EDSMate or PotsMate was found here. That's normal on iPhone, where each home screen app keeps its own data. It takes two minutes with a backup file:</p>
+        <ol style="margin:0 0 16px 20px;font-size:14.5px;line-height:1.7"><li>Open your old app and tap the ⚙️ settings button</li><li>Tap <b>Back up to a file</b> (or Export backup) and save it</li><li>Come back here and tap <b>Choose a backup file</b> below</li></ol>
         <button class="btn btn-primary btn-block" style="margin-bottom:10px" onclick="document.getElementById('restore2').click()">Choose a backup file</button>
         <input id="restore2" type="file" accept="application/json,.json" class="hidden" onchange="restore(this.files[0])"/>
         <button class="btn btn-ghost btn-block" onclick="closeModal()">Not now</button>`;
